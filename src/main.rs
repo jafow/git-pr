@@ -1,9 +1,36 @@
-use std::fs::File;
-use std::io::{self, Read, Write, BufReader};
+use std::env;
+use std::fmt::Error;
+use std::fs;
+use std::fs::{File};
+use std::io::{self, Write};
+use std::path::Path;
+
 use async_std::task;
+use regex::Regex;
 
-use promptly::{prompt};
+fn branch_err() -> Error {
+    Error
+}
 
+fn head_file(head_file: &Path) -> Result<String, io::Error> {
+    fs::read_to_string(head_file)
+}
+
+/// read over the .git/HEAD file to get current branch
+fn current_branch(head_file_contents: String) -> Option<String> {
+    match head_file_contents.lines().next() {
+        Some(line) => line.split('/').map(String::from).collect::<Vec<String>>().pop(),
+        _ => None
+    }
+}
+
+#[test]
+fn test_current_branch() {
+    let hf = head_file(&Path::new("./tests/HEAD_A")).expect("test file");
+    let actual = current_branch(hf);
+
+    assert_eq!(Some(String::from("test-branch")), actual)
+}
 
 fn prompt_username() -> String {
     let mut res = String::new(); 
@@ -13,20 +40,59 @@ fn prompt_username() -> String {
     res
 }
 
-// #[runtime::main]
-// async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-fn main() -> std::io::Result<()> {
+fn get_remote(text: &str) -> Result<Vec<&str>, ()>  {
+    let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_]+)/(?P<repo>[A-Za-z0-9_])"#).unwrap();
 
-    let mut f = File::open(".git/config")?;
-    let mut reader = BufReader::new(f);
-    let mut body = String::new();
+    let mut v: Vec<&str> = Vec::new();
 
-    reader.read_to_string(&mut body)?;
+    for caps in re.captures_iter(text) {
+        match &caps.name("author") {
+            Some(m) => v.push(m.as_str()),
+            None => ()
+        }
 
-    for lin in body.lines() {
-        println!("line: {}", lin);
+        match &caps.name("repo") {
+            Some(m) => v.push(m.as_str()),
+            None => ()
+        }
+
+        match &caps.name("origin") {
+            Some(m) => v.push(m.as_str()),
+            None => ()
+        }
+
     }
 
+    Ok(v)
+}
+
+fn main() -> std::io::Result<()> {
+    let args: Vec<String> = env::args().collect();
+
+    let remote = match args.len() {
+        2 => "origin",
+        3 => &args[2],
+        _ => panic!("Incorrect args")
+    };
+
+    let git_head = head_file(&Path::new("./.git/HEAD")).expect("git HEAD");
+    let br = current_branch(git_head);
+    dbg!(br);
+    // reader.read_to_string(&mut body)?;
+
+    // let target_remote = "origin";
+    // let mut rmt = "wrong";
+
+    // let caps = get_remote(body.as_str());
+
+    // for lin in body.lines() {
+    //     println!("line: {}", lin);
+    //     rmt = get_remote(target_remote);
+    // }
+    // match caps {
+        // Ok(c) => println!("remote {:?}", c[0]),
+        // _ => println!("fn")
+    // }
 
     Ok(())
 }
