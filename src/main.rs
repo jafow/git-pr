@@ -32,13 +32,6 @@ fn test_current_branch() {
     assert_eq!(Some(String::from("test-branch")), actual)
 }
 
-fn prompt_username() -> String {
-    let mut res = String::new(); 
-
-    writeln!(io::stdout(), "Username for 'https://github.com': ").expect("write stdout");
-    io::stdin().read_line(&mut res).expect("read stdin");
-    res
-}
 
 fn get_remote(text: &str) -> Result<Vec<&str>, ()>  {
     let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_]+)/(?P<repo>[A-Za-z0-9_])"#).unwrap();
@@ -77,7 +70,9 @@ fn main() -> std::io::Result<()> {
 
     let git_head = head_file(&Path::new("./.git/HEAD")).expect("git HEAD");
     let br = current_branch(git_head);
-    dbg!(br);
+    let token = env::var("GITHUB_TOKEN").expect("required GITHUB_TOKEN");
+
+    dbg!(token);
     // reader.read_to_string(&mut body)?;
 
     // let target_remote = "origin";
