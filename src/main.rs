@@ -1,3 +1,4 @@
+
 use std::env;
 use std::fmt::Error;
 use std::fs;
@@ -7,6 +8,10 @@ use std::path::Path;
 
 use async_std::task;
 use regex::Regex;
+
+extern crate clap;
+use clap::{Arg, App, SubCommand};
+
 
 fn branch_err() -> Error {
     Error
@@ -60,34 +65,48 @@ fn get_remote(text: &str) -> Result<Vec<&str>, ()>  {
 }
 
 fn main() -> std::io::Result<()> {
-    let args: Vec<String> = env::args().collect();
+    let matches = App::new("git-pr")
+                    .version("0.1.0")
+                    .author("Jared Fowler <jaredafowler@gmail.com>")
+                    .about("Open github pull requests")
+                    .usage("git pr origin master
+    git pr upstream feat/add-feature -m \"This is the title of my PR\"")
+                    .arg(
+                        Arg::with_name("remote")
+                        .help("the name of the remote; e.g origin")
+                        .index(1)
+                        .required(true),
+                    )
+                    .arg(
+                        Arg::with_name("target")
+                        .help("[optional] The pull request's target branch; e.g. master. Defaults to master")
+                        .index(2)
+                        .requires("remote")
+                        )
+                    .arg(
+                        Arg::with_name("message")
+                        .help("Use the message as Pull Request message")
+                        .short("m")
+                        .long("message")
+                        .required(false)
+                        )
+                    .get_matches();
 
-    let remote = match args.len() {
-        2 => "origin",
-        3 => &args[2],
-        _ => panic!("Incorrect args")
+    let remote = matches.value_of("remote").unwrap();
+    let target = match matches.value_of("target") {
+        Some(t) => t,
+        None => "master"
     };
+
+    dbg!(remote);
+    dbg!(target);
 
     let git_head = head_file(&Path::new("./.git/HEAD")).expect("git HEAD");
     let br = current_branch(git_head);
     let token = env::var("GITHUB_TOKEN").expect("required GITHUB_TOKEN");
 
     dbg!(token);
-    // reader.read_to_string(&mut body)?;
-
-    // let target_remote = "origin";
-    // let mut rmt = "wrong";
-
-    // let caps = get_remote(body.as_str());
-
-    // for lin in body.lines() {
-    //     println!("line: {}", lin);
-    //     rmt = get_remote(target_remote);
-    // }
-    // match caps {
-        // Ok(c) => println!("remote {:?}", c[0]),
-        // _ => println!("fn")
-    // }
+    dbg!(br);
 
     Ok(())
 }
