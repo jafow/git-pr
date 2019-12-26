@@ -1,10 +1,10 @@
-
 use std::env;
 use std::fmt::Error;
 use std::fs;
 use std::fs::{File};
 use std::io::{self, Write};
 use std::path::Path;
+use std::process::Command;
 
 use async_std::task;
 use regex::Regex;
@@ -64,13 +64,20 @@ fn get_remote(text: &str) -> Result<Vec<&str>, ()>  {
     Ok(v)
 }
 
+fn launch_editor() -> Result<(), ()> {
+    let editor = env::var("GIT_EDITOR").expect("no $GIT_EDITOR set");
+    let output = Command::new("sh").arg("-c").arg(format!("{} ./.git/PR_MESSAGE", &editor)).spawn().expect("open editor");
+    // writeln!(output.stdout, "{}", "butttts");
+    dbg!(output);
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     let matches = App::new("git-pr")
                     .version("0.1.0")
                     .author("Jared Fowler <jaredafowler@gmail.com>")
                     .about("Open github pull requests")
-                    .usage("git pr origin master
-    git pr upstream feat/add-feature -m \"This is the title of my PR\"")
+                    .usage("git pr origin master\n    git pr upstream feat/add-feature -m \"This is the title of my PR\"")
                     .arg(
                         Arg::with_name("remote")
                         .help("the name of the remote; e.g origin")
@@ -107,6 +114,8 @@ fn main() -> std::io::Result<()> {
 
     dbg!(token);
     dbg!(br);
+
+    launch_editor();
 
     Ok(())
 }
