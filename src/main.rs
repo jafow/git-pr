@@ -1,8 +1,7 @@
 use std::env;
-use std::fmt::Error;
 use std::fs;
-use std::fs::{File};
-use std::io::{self, Write};
+use std::fs::{OpenOptions};
+use std::io::{self};
 use std::path::Path;
 use std::process::Command;
 
@@ -10,12 +9,7 @@ use async_std::task;
 use regex::Regex;
 
 extern crate clap;
-use clap::{Arg, App, SubCommand};
-
-
-fn branch_err() -> Error {
-    Error
-}
+use clap::{App, Arg};
 
 fn head_file(head_file: &Path) -> Result<String, io::Error> {
     fs::read_to_string(head_file)
@@ -24,8 +18,12 @@ fn head_file(head_file: &Path) -> Result<String, io::Error> {
 /// read over the .git/HEAD file to get current branch
 fn current_branch(head_file_contents: String) -> Option<String> {
     match head_file_contents.lines().next() {
-        Some(line) => line.split('/').map(String::from).collect::<Vec<String>>().pop(),
-        _ => None
+        Some(line) => line
+            .split('/')
+            .map(String::from)
+            .collect::<Vec<String>>()
+            .pop(),
+        _ => None,
     }
 }
 
@@ -37,8 +35,7 @@ fn test_current_branch() {
     assert_eq!(Some(String::from("test-branch")), actual)
 }
 
-
-fn get_remote(text: &str) -> Result<Vec<&str>, ()>  {
+fn get_remote(text: &str) -> Result<Vec<&str>, ()> {
     let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_]+)/(?P<repo>[A-Za-z0-9_])"#).unwrap();
 
     let mut v: Vec<&str> = Vec::new();
@@ -46,19 +43,18 @@ fn get_remote(text: &str) -> Result<Vec<&str>, ()>  {
     for caps in re.captures_iter(text) {
         match &caps.name("author") {
             Some(m) => v.push(m.as_str()),
-            None => ()
+            None => (),
         }
 
         match &caps.name("repo") {
             Some(m) => v.push(m.as_str()),
-            None => ()
+            None => (),
         }
 
         match &caps.name("origin") {
             Some(m) => v.push(m.as_str()),
-            None => ()
+            None => (),
         }
-
     }
 
     Ok(v)
@@ -66,7 +62,17 @@ fn get_remote(text: &str) -> Result<Vec<&str>, ()>  {
 
 fn launch_editor() -> Result<(), ()> {
     let editor = env::var("GIT_EDITOR").expect("no $GIT_EDITOR set");
-    let output = Command::new("sh").arg("-c").arg(format!("{} ./.git/PR_MESSAGE", &editor)).spawn().expect("open editor");
+    let pr_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(".git/PR_EDITMSG");
+    dbg!(pr_file);
+
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(format!("\"{} ./.git/PR_EDITMSG\"", &editor))
+        .spawn()
+        .expect("open editor");
     // writeln!(output.stdout, "{}", "butttts");
     dbg!(output);
     Ok(())
@@ -102,7 +108,7 @@ fn main() -> std::io::Result<()> {
     let remote = matches.value_of("remote").unwrap();
     let target = match matches.value_of("target") {
         Some(t) => t,
-        None => "master"
+        None => "master",
     };
 
     dbg!(remote);
@@ -115,14 +121,17 @@ fn main() -> std::io::Result<()> {
     dbg!(token);
     dbg!(br);
 
-    launch_editor();
+    launch_editor().expect("launch editor");
 
     Ok(())
 }
 
-fn fetch_api(uname: &str, password: &str, repo: &str) -> Result<(), surf::Exception> {
+fn xfetch_api(uname: &str, password: &str, repo: &str) -> Result<(), surf::Exception> {
     task::block_on(async {
-        let url = format!("https://{}:{}@api.github.com/repos/{}/{}/pulls?sort=created", &uname, &password, &uname, &repo);
+        let url = format!(
+            "https://{}:{}@api.github.com/repos/{}/{}/pulls?sort=created",
+            &uname, &password, &uname, &repo
+        );
         dbg!(&url);
         let res: String = surf::get(url).recv_string().await?;
         println!("{}", res);
