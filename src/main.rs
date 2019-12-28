@@ -1,12 +1,17 @@
+// #![feature(with_options)]
+
 use std::env;
 use std::fs;
-use std::fs::{OpenOptions};
-use std::io::{self};
+
+use std::fs::{File, OpenOptions};
+use std::io::{self, prelude::*};
 use std::path::Path;
 use std::process::Command;
 
 use async_std::task;
 use regex::Regex;
+
+use serde_json::Result;
 
 extern crate clap;
 use clap::{App, Arg};
@@ -64,22 +69,39 @@ fn get_remote(text: &str) -> Result<Vec<&str>, ()> {
     Ok(v)
 }
 
-fn launch_editor() -> Result<(), ()> {
+fn launch_editor() -> std::io::Result<()> {
     let editor = env::var("GIT_EDITOR").expect("no $GIT_EDITOR set");
-    let pr_file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(".git/PR_EDITMSG");
-    dbg!(pr_file);
+    let sub = format!("{} ", editor);
+    let cmd = Command::new("sh")
+                .args(&["-c", &sub])
+                .spawn()
+                .and_then(|mut c| c.wait())
+                .expect("error opening editor");
 
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(format!("{} .git/PR_EDITMSG", &editor))
-        .output()
-        .expect("open editor");
-    // writeln!(output.stdout, "{}", "butttts");
-    dbg!(output);
+    // let ecode = cmd.wait().expect("open editor failed");
+
+    // dbg!(output);
+    dbg!(cmd);
     Ok(())
+}
+
+
+fn build_message(target: &str, current: &str) -> std::io::Result<()> {
+    let mut pr_file = File::create(PR_EDITMSG_PATH)?;
+
+    let msg = format!("
+
+// Requesting a pull to {} from {}
+// Write a message for this pull request. The first line
+// of text is the title and the rest is the description.
+// All lines beginning with // will be ignored", target, current);
+
+    pr_file.write(msg.as_bytes())?;
+    Ok(())
+}
+
+fn build_request(target: &str, current: &str, token: String) {
+    
 }
 
 fn main() -> std::io::Result<()> {
