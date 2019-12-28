@@ -27,15 +27,19 @@ fn current_branch(head_file_contents: String) -> Option<String> {
     }
 }
 
-#[test]
-fn test_current_branch() {
-    let hf = head_file(&Path::new("./tests/HEAD_A")).expect("test file");
-    let actual = current_branch(hf);
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_current_branch() {
+        let hf = head_file(&Path::new("./tests/HEAD_A")).expect("test file");
+        let actual = current_branch(hf);
 
-    assert_eq!(Some(String::from("test-branch")), actual)
+        assert_eq!(Some(String::from("test-branch")), actual)
+    }
 }
 
 fn get_remote(text: &str) -> Result<Vec<&str>, ()> {
+    // captures author, repo, and remote url from git config file
     let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_]+)/(?P<repo>[A-Za-z0-9_])"#).unwrap();
 
     let mut v: Vec<&str> = Vec::new();
