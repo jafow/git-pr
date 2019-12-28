@@ -70,8 +70,8 @@ fn launch_editor() -> Result<(), ()> {
 
     let output = Command::new("sh")
         .arg("-c")
-        .arg(format!("\"{} ./.git/PR_EDITMSG\"", &editor))
-        .spawn()
+        .arg(format!("{} .git/PR_EDITMSG", &editor))
+        .output()
         .expect("open editor");
     // writeln!(output.stdout, "{}", "butttts");
     dbg!(output);
