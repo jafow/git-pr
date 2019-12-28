@@ -102,6 +102,17 @@ fn build_message(target: &str, current: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+struct PullRequestMsg {
+    title: String,
+    body: String
+}
+
+struct PullRequest {
+    target_branch: String,
+    head_branch: String,
+    message: PullRequestMsg
+}
+
 fn build_request(target: &str, current: &str, token: String) {
 
 }
