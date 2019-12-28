@@ -11,10 +11,12 @@ use std::process::Command;
 use async_std::task;
 use regex::Regex;
 
-use serde_json::Result;
+// use serde_json::Result;
 
 extern crate clap;
 use clap::{App, Arg};
+
+const PR_EDITMSG_PATH: &str = ".git/PR_EDITMSG";
 
 fn head_file(head_file: &Path) -> Result<String, io::Error> {
     fs::read_to_string(head_file)
@@ -96,12 +98,12 @@ fn build_message(target: &str, current: &str) -> std::io::Result<()> {
 // of text is the title and the rest is the description.
 // All lines beginning with // will be ignored", target, current);
 
-    pr_file.write(msg.as_bytes())?;
+    pr_file.write_all(msg.as_bytes()).expect("write pr file");
     Ok(())
 }
 
 fn build_request(target: &str, current: &str, token: String) {
-    
+
 }
 
 fn main() -> std::io::Result<()> {
@@ -137,42 +139,29 @@ fn main() -> std::io::Result<()> {
         None => "master",
     };
 
-    dbg!(remote);
-    dbg!(target);
-
     let git_head = head_file(&Path::new("./.git/HEAD")).expect("git HEAD");
-    let br = current_branch(git_head);
+    let br = current_branch(git_head).unwrap();
     let token = env::var("GITHUB_TOKEN").expect("required GITHUB_TOKEN");
 
-    dbg!(token);
-    dbg!(br);
-
+    build_message(target, &br)?;
     launch_editor().expect("launch editor");
+    // build_request(target, &br, token);
+    task::block_on(async {
+        let ff = fetch_api("jafow", &token, "git-pr").await;
+        match ff {
+            Ok(r) => r,
+            Err(e) => panic!("Error {}", e)
+        }
+    });
+
 
     Ok(())
 }
 
-fn xfetch_api(uname: &str, password: &str, repo: &str) -> Result<(), surf::Exception> {
-    task::block_on(async {
-        let url = format!(
-            "https://{}:{}@api.github.com/repos/{}/{}/pulls?sort=created",
-            &uname, &password, &uname, &repo
-        );
-        dbg!(&url);
-        let res: String = surf::get(url).recv_string().await?;
-        println!("{}", res);
-        Ok::<(), surf::Exception>(())
-    })
-}
-// The need for Ok with turbofish is explained here
-// https://rust-lang.github.io/async-book/07_workarounds/03_err_in_async_blocks.html
-// fn main() -> Result<(), surf::Exception> {
-//     // femme::start(log::LevelFilter::Info)?;
+async fn fetch_api(uname: &str, password: &str, repo: &str) -> Result<surf::Response, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    let url = format!("https://{}:{}@api.github.com/repos/{}/{}/pulls", &uname, &password, &uname, &repo);
 
-//     task::block_on(async {
-//         let uri = "https://httpbin.org/get";
-//         let string: String = surf::get(uri).recv_string().await?;
-//         println!("{}", string);
-//         Ok::<(), surf::Exception>(())
-//     })
-// }
+    let body = serde_json::json!({"title": "foo 3", "head": "feat", "base": "master", "body": "from serde_json"});
+    let res = surf::post(&url).body_json(&body)?.await?;
+    Ok(res)
+}
