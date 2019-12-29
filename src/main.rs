@@ -48,6 +48,39 @@ mod tests {
 
         assert_eq!(Some(String::from("test-branch")), actual)
     }
+
+    #[test]
+    fn test_build_message() -> Result<(), Box<dyn std::error::Error>> {
+        // it should build a PullRequestMsg from file
+        let mut f = File::create(PR_EDITMSG_PATH)?;
+        f.write_all(b"test title\n\nthis is a test msg body\n\n// Requesting a pull to master from feat");
+
+        let expected = PullRequestMsg { title: String::from("test title"), body: String::from("this is a test msg body")};
+        assert_eq!(Some(expected), build_pr_msg(Some(PR_EDITMSG_PATH)));
+        Ok(())
+    }
+
+    #[test]
+    fn test_build_request_payload() {
+        let expectedL = PullRequest {
+            target_branch: "master",
+            head_branch: "test",
+            message: PullRequestMsg {
+                title: String::from("test title"),
+                body: String::from("this is a test msg body")
+            }
+        };
+        let expectedR = serde_json::json!({"title": "test title", "body": "this is a test msg body", "head": "test", "base": "master"});
+        let test_input = PullRequest {
+            target_branch: "master",
+            head_branch: "test",
+            message: PullRequestMsg {
+                title: String::from("test title"),
+                body: String::from("this is a test msg body")
+            }
+        };
+        assert_eq!((expectedL, expectedR), build_request_payload(test_input))
+    }
 }
 
 fn get_remote(text: &str) -> Result<Vec<&str>, ()> {
