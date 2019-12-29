@@ -3,7 +3,7 @@
 use std::env;
 use std::fs;
 
-use std::fs::{File};
+use std::fs::File;
 use std::io::{self, prelude::*};
 use std::path::Path;
 use std::process::Command;
@@ -19,7 +19,7 @@ use clap::{App, Arg};
 
 const PR_EDITMSG_PATH: &str = ".git/PR_EDITMSG";
 
-fn head_file(head_file: &Path) -> Result<String, io::Error> {
+fn read_file(head_file: &Path) -> Result<String, io::Error> {
     fs::read_to_string(head_file)
 }
 
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn test_current_branch() {
-        let hf = head_file(&Path::new("./tests/HEAD_A")).expect("test file");
+        let hf = read_file(&Path::new("./tests/HEAD_A")).expect("test file");
         let actual = current_branch(hf);
 
         assert_eq!(Some(String::from("test-branch")), actual)
@@ -53,33 +53,31 @@ mod tests {
     fn test_build_message() -> Result<(), Box<dyn std::error::Error>> {
         // it should build a PullRequestMsg from file
         let mut f = File::create(PR_EDITMSG_PATH)?;
-        f.write_all(b"test title\n\nthis is a test msg body\n\n// Requesting a pull to master from feat");
+        f.write_all(
+            b"test title\n\nthis is a test msg body\n\n// Requesting a pull to master from feat",
+        );
 
-        let expected = PullRequestMsg { title: String::from("test title"), body: String::from("this is a test msg body")};
+        let expected = PullRequestMsg {
+            title: String::from("test title"),
+            body: String::from("this is a test msg body"),
+        };
         assert_eq!(Some(expected), build_pr_msg(Some(PR_EDITMSG_PATH)));
         Ok(())
     }
 
     #[test]
     fn test_build_request_payload() {
-        let expectedL = PullRequest {
-            target_branch: "master",
-            head_branch: "test",
-            message: PullRequestMsg {
-                title: String::from("test title"),
-                body: String::from("this is a test msg body")
-            }
-        };
-        let expectedR = serde_json::json!({"title": "test title", "body": "this is a test msg body", "head": "test", "base": "master"});
         let test_input = PullRequest {
             target_branch: "master",
             head_branch: "test",
             message: PullRequestMsg {
                 title: String::from("test title"),
-                body: String::from("this is a test msg body")
-            }
+                body: String::from("this is a test msg body"),
+            },
         };
-        assert_eq!((expectedL, expectedR), build_request_payload(test_input))
+
+        let expected = serde_json::json!({"title": "test title", "body": "this is a test msg body", "head": "test", "base": "master"});
+        assert_eq!(expected, build_request_payload(test_input))
     }
 }
 
@@ -113,22 +111,21 @@ fn launch_editor(pr_file: &str) -> std::io::Result<()> {
     let editor = env::var("GIT_EDITOR").expect("no $GIT_EDITOR set");
     let sub = format!("{} {}", editor, pr_file);
     let cmd = Command::new("sh")
-                .args(&["-c", &sub])
-                .spawn()
-                .and_then(|mut c| c.wait())
-                .expect("error opening editor");
+        .args(&["-c", &sub])
+        .spawn()
+        .and_then(|mut c| c.wait())
+        .expect("error opening editor");
     Ok(())
 }
 
 fn build_pr_msg(msg_path: Option<&str>) -> Option<PullRequestMsg> {
     let p = match msg_path {
         Some(p) => p,
-        None => PR_EDITMSG_PATH
+        None => PR_EDITMSG_PATH,
     };
     let pr_file: String = fs::read_to_string(p).expect("read test file");
     let mut lines = pr_file.lines();
     let mut title = String::new();
-    let mut body = String::new();
 
     // set the first line as title
     if let Some(_title) = lines.next() {
@@ -137,52 +134,52 @@ fn build_pr_msg(msg_path: Option<&str>) -> Option<PullRequestMsg> {
         println!("Error getting title");
     }
 
-    while let Some(line) = lines.next() {
-        if line.starts_with("// Requesting a pull to") {
-            break;
-        } else {
-            body.push_str(line);
-        }
-    }
+    let body: String = lines
+        .take_while(|line| !line.starts_with("// Requesting a pull to"))
+        .collect();
 
-    Some(
-        PullRequestMsg {
-            title: title,
-            body: body
-        }
-    )
+    Some(PullRequestMsg { title, body })
 }
-
 
 fn pr_msg_template(target: &str, current: &str) -> std::io::Result<()> {
     let mut pr_file = File::create(PR_EDITMSG_PATH)?;
 
-    let msg = format!("
+    let msg = format!(
+        "
 
 // Requesting a pull to {} from {}
 // Write a message for this pull request. The first line
 // of text is the title and the rest is the description.
-// All lines beginning with // will be ignored", target, current);
+// All lines beginning with // will be ignored",
+        target, current
+    );
 
     pr_file.write_all(msg.as_bytes()).expect("write pr file");
     Ok(())
 }
 
-fn build_request_payload(pr: PullRequest) -> (PullRequest, serde_json::Value) {
-    (pr, serde_json::json!({"title": "test title", "body": "this is a test msg body", "head": "test", "base": "master"}))
+fn build_request_payload(pr: PullRequest) -> serde_json::Value {
+    serde_json::json!(
+        {
+            "title": pr.message.title,
+            "body": pr.message.body,
+            "head": pr.head_branch,
+            "base": pr.target_branch
+        }
+    )
 }
 
 #[derive(Debug, PartialEq)]
 struct PullRequestMsg {
     title: String,
-    body: String
+    body: String,
 }
 
 #[derive(Debug, PartialEq)]
 struct PullRequest<'a> {
     target_branch: &'a str,
     head_branch: &'a str,
-    message: PullRequestMsg
+    message: PullRequestMsg,
 }
 
 fn main() -> std::io::Result<()> {
@@ -220,7 +217,9 @@ fn main() -> std::io::Result<()> {
 
     let token = env::var("GITHUB_TOKEN").expect("required GITHUB_TOKEN");
 
-    let git_head = head_file(&Path::new("./.git/HEAD")).expect("git HEAD");
+    let git_head = read_file(&Path::new("./.git/HEAD")).expect("git HEAD");
+    let config_file = read_file(&Path::new("./.git/config"))?;
+    let repo_data = get_remote(&config_file).expect("read git config file");
     let br = current_branch(git_head).unwrap();
 
     pr_msg_template(&target, &br).expect("build PR message template");
@@ -229,24 +228,40 @@ fn main() -> std::io::Result<()> {
 
     let msg: PullRequestMsg = build_pr_msg(None).expect("build pr message");
 
-    let pr = PullRequest {target_branch: &target, head_branch: &br, message: msg };
+    let pr = PullRequest {
+        target_branch: &target,
+        head_branch: &br,
+        message: msg,
+    };
 
     task::block_on(async {
         let payload = build_request_payload(pr);
-        let ff = fetch_api("jafow", &token, "git-pr", &br).await;
+        let ff = fetch_api(&repo_data[1], &repo_data[0], &token, payload).await;
         match ff {
-            Ok(r) => r,
-            Err(e) => panic!("Error {}", e)
+            Ok(r) => {
+                println!("got a response {:?}", r);
+                r
+            }
+            Err(e) => panic!("Error {}", e),
         }
     });
 
     Ok(())
 }
 
-async fn fetch_api(uname: &str, password: &str, repo: &str, branch_head: &str) -> Result<surf::Response, Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let url = format!("https://{}:{}@api.github.com/repos/{}/{}/pulls", &uname, &password, &uname, &repo);
+async fn fetch_api(
+    repo: &str,
+    uname: &str,
+    password: &str,
+    body: serde_json::Value,
+) -> Result<surf::Response, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    let url = format!(
+        "https://{}:{}@api.github.com/repos/{}/{}/pulls",
+        &uname, &password, &uname, &repo
+    );
 
-    let body = serde_json::json!({"title": "foo 3", "head": format!("\"{}\"", branch_head), "base": "master", "body": "from serde_json"});
+    // let body = serde_json::json!({"title": format!("\"{}\"", pr_data.message.title), "head": format!("\"{}\"", pr_data.head_branch), "base": pr_data.target_branch, "body": pr_data.message.body});
     let res = surf::post(&url).body_json(&body)?.await?;
+    dbg!(&res);
     Ok(res)
 }
