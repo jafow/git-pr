@@ -83,7 +83,7 @@ mod tests {
 
 fn get_remote(text: &str) -> Result<Vec<&str>, ()> {
     // captures author, repo, and remote url from git config file
-    let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_]+)/(?P<repo>[A-Za-z0-9_])"#).unwrap();
+    let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_]+)/(?P<repo>[A-Za-z0-9_-]+)"#).unwrap();
 
     let mut v: Vec<&str> = Vec::new();
 
