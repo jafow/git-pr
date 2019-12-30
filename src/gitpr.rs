@@ -1,4 +1,5 @@
 use std::env;
+use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
@@ -22,18 +23,26 @@ pub struct PullRequest<'a> {
     pub message: PullRequestMsg,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepoData<'a> {
+    author: &'a str,
+    pub repo_name: &'a str,
+}
 
-pub struct RepoData {
-    pub author: String,
-    pub repo_name: String,
-    pub remote: String
+#[derive(Debug, Clone, PartialEq)]
+pub struct RepoError;
+
+impl fmt::Display for RepoError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Error reading repo configuration")
+    }
 }
 
 pub fn read_file(head_file: &Path) -> Result<String, io::Error> {
     fs::read_to_string(head_file)
 }
 
-/// read over the .git/HEAD file to get current branch
+/// split the .git/HEAD file on '/' to get current branch
 pub fn current_branch(head_file_contents: String) -> Option<String> {
     match head_file_contents.lines().next() {
         Some(line) => line
@@ -41,7 +50,7 @@ pub fn current_branch(head_file_contents: String) -> Option<String> {
             .map(String::from)
             .collect::<Vec<String>>()
             .pop(),
-        _ => None,
+        _ => panic!("Could not find current branch from git config"),
     }
 }
 
@@ -50,7 +59,18 @@ fn test_current_branch() {
     let hf = read_file(&Path::new("./tests/HEAD_A")).expect("test file");
     let actual = current_branch(hf);
 
-    assert_eq!(Some(String::from("test-branch")), actual)
+    assert_eq!(Some(String::from("test-branch")), actual);
+}
+
+#[test]
+#[should_panic]
+fn test_current_branch_errors() {
+    // it should panic if file doesn't exist or is malformed
+    let hf = read_file(&Path::new("./tests/HEAD_FILENOTFOUND")).expect("test file");
+    current_branch(hf);
+
+    let hf = read_file(&Path::new("./tests/HEAD_BROKEN")).expect("test file");
+    current_branch(hf);
 }
 
 pub fn build_pr_msg(msg_path: Option<&str>) -> Option<PullRequestMsg> {
@@ -58,9 +78,10 @@ pub fn build_pr_msg(msg_path: Option<&str>) -> Option<PullRequestMsg> {
         Some(p) => p,
         None => PR_EDITMSG_PATH,
     };
+    let mut title = String::new();
+
     let pr_file: String = fs::read_to_string(p).expect("read test file");
     let mut lines = pr_file.lines();
-    let mut title = String::new();
 
     // set the first line as title
     if let Some(_title) = lines.next() {
@@ -95,43 +116,79 @@ fn test_build_message() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn repo_config(text: &str, remote_match: &str) -> Result<RepoData, Box<dyn std::error::Error>> {
+pub fn repo_config<'a>(text: &'a str, remote_match: &'a str) -> Result<RepoData<'a>, RepoError> {
     // captures author, repo, and remote url from git config file
-    let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_]+)/(?P<repo>[A-Za-z0-9_-]+)"#).unwrap();
+    let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_-]+)/(?P<repo>[A-Za-z0-9_-]+)"#).unwrap();
 
-    let mut author = String::new();
-    let mut repo_name = String::new();
-    let mut remote = String::new();
+    // get only lines that match on the remote provided so that we
+    // avoid confusion with forked remotes of the same name
+    let match_lines = match re
+        .captures(text)
+        .filter(|c| c.name("origin").unwrap().as_str() == remote_match)
+    {
+        Some(m) => m,
+        None => return Err(RepoError),
+    };
 
-    for caps in re.captures_iter(text) {
-        match &caps.name("author") {
-            Some(m) => author.push_str(m.as_str()),
-            None => (),
-        }
-
-        match &caps.name("repo") {
-            Some(m) => repo_name.push_str(m.as_str()),
-            None => (),
-        }
-
-        match &caps.name("origin") {
-            Some(m) => {
-                let ms = m.as_str();
-                if ms == remote_match {
-                    remote.push_str(ms);
-                }
-            },
-            None => (),
-        }
-    }
-
-    Ok(RepoData { author, repo_name, remote })
+    Ok(RepoData {
+        author: match match_lines.get(3) {
+            Some(s) => s.as_str(),
+            None => return Err(RepoError),
+        },
+        repo_name: match match_lines.get(4) {
+            Some(s) => s.as_str(),
+            None => return Err(RepoError),
+        },
+    })
 }
 
 #[test]
 fn test_repo_config() {
-    // it should get the author, repo, and remote from config
+    // it should pull RepoData from config
+    let cfg_file = r#"
+[core]
+	bare = false
+	repositoryformatversion = 0
+	filemode = true
+	logallrefupdates = true
+[remote "origin"]
+	url = git@github.com:jafow/git-pr.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "master"]
+	remote = origin
+	merge = refs/heads/master
+"#;
+    assert_eq!(
+        Ok(RepoData {
+            author: "jafow",
+            repo_name: "git-pr"
+        }),
+        repo_config(cfg_file, "origin")
+    );
 
+    let cfg_file = r#"
+[core]
+	bare = false
+	repositoryformatversion = 0
+	filemode = true
+	logallrefupdates = true
+[remote "origin"]
+	url = unrecognizable-url/jafow/git-pr.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "master"]
+	remote = origin
+	merge = refs/heads/master
+"#;
+    assert_eq!(
+        Err(RepoError),
+        repo_config(cfg_file, "upstream"),
+        "Error on non existent remote"
+    );
+    assert_eq!(
+        Err(RepoError),
+        repo_config(cfg_file, "origin"),
+        "Error on malformed url"
+    );
 }
 
 pub fn pr_msg_template(target: &str, current: &str) -> std::io::Result<()> {
@@ -154,7 +211,7 @@ pub fn pr_msg_template(target: &str, current: &str) -> std::io::Result<()> {
 pub fn launch_editor(pr_file: &str) -> std::io::Result<()> {
     let editor = env::var("GIT_EDITOR").expect("no $GIT_EDITOR set");
     let sub = format!("{} {}", editor, pr_file);
-    let cmd = Command::new("sh")
+    let _cmd = Command::new("sh")
         .args(&["-c", &sub])
         .spawn()
         .and_then(|mut c| c.wait())
@@ -184,19 +241,20 @@ fn test_build_request_payload() {
         },
     };
 
-    let expected = serde_json::json!({"title": "test title", "body": "this is a test msg body", "head": "test", "base": "master"});
-    assert_eq!(expected, build_request_payload(test_input))
+    assert_eq!(
+        serde_json::json!({"title": "test title", "body": "this is a test msg body", "head": "test", "base": "master"}),
+        build_request_payload(test_input)
+    )
 }
 
-pub async fn fetch_api(
-    repo: &str,
-    uname: &str,
-    password: &str,
+pub async fn fetch_api<'a>(
+    repo_data: RepoData<'a>,
+    token: &str,
     body: serde_json::Value,
 ) -> Result<surf::Response, Box<dyn std::error::Error + Send + Sync + 'static>> {
     let url = format!(
         "https://{}:{}@api.github.com/repos/{}/{}/pulls",
-        &uname, &password, &uname, &repo
+        &repo_data.author, &token, &repo_data.author, &repo_data.repo_name
     );
 
     dbg!(&url);
