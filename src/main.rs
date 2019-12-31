@@ -1,12 +1,14 @@
 use std::env;
 use std::path::Path;
+use std::process;
 
-use clap::{App, Arg};
 use async_std::task;
+use clap::{App, Arg};
 
 const PR_EDITMSG_PATH: &str = ".git/PR_EDITMSG";
 
 mod gitpr;
+use gitpr::*;
 
 fn main() -> std::io::Result<()> {
     let matches = App::new("git-pr")
@@ -31,28 +33,30 @@ fn main() -> std::io::Result<()> {
                         .help("Use the message as Pull Request message")
                         .short("m")
                         .long("message")
+                        .takes_value(true)
                         .required(false)
                         )
                     .get_matches();
 
     let remote = match matches.value_of("remote") {
         Some(r) => r,
-        None => "origin"
+        None => "origin",
     };
     let target = match matches.value_of("target") {
         Some(t) => t,
         None => "master",
     };
-    let token = env::var("GITHUB_TOKEN").expect("required GITHUB_TOKEN");
-    let git_head = gitpr::read_file(&Path::new("./.git/HEAD")).expect("git HEAD");
-    let config_file = gitpr::read_file(&Path::new("./.git/config"))?;
-    // todo: destructure this into author and repo only
-    let repo_data: gitpr::RepoData = gitpr::repo_config(&config_file, remote).expect("read git config file");
-    dbg!(&repo_data.repo_name);
+    let token = env::var("GITHUB_TOKEN").expect("no GITHUB_TOKEN found in environment");
+
+    let git_head = gitpr::read_file(&Path::new("./.git/HEAD"))?;
     let branch = gitpr::current_branch(git_head).unwrap();
 
+    let config_file = gitpr::read_file(&Path::new("./.git/config"))?;
+    let repo_data: RepoData =
+        gitpr::repo_config(&config_file, remote).expect("read git config file");
+
     gitpr::pr_msg_template(&target, &branch).expect("build PR message template");
-    
+
     gitpr::launch_editor(PR_EDITMSG_PATH).expect("launch editor");
 
     let msg: gitpr::PullRequestMsg = gitpr::build_pr_msg(None).expect("build pr message");
@@ -65,14 +69,14 @@ fn main() -> std::io::Result<()> {
 
     task::block_on(async {
         let payload = gitpr::build_request_payload(pr);
-        let ff = gitpr::fetch_api(&repo_data.repo_name, &repo_data.author, &token, payload).await;
-        dbg!(&ff);
-        match ff {
+        match gitpr::fetch_api(repo_data, &token, payload).await {
             Ok(r) => {
-                println!("got a response {:?}", r);
-                r
+                println!("Pull request opend at {:?}", r.html_url);
             }
-            Err(e) => panic!("Error {}", e),
+            Err(e) => {
+                println!("Error opening pull request {:?}", e);
+                process::exit(1);
+            }
         }
     });
 

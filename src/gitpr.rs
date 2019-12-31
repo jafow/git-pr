@@ -1,4 +1,5 @@
 use std::env;
+use std::error;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -6,6 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 use regex::Regex;
+use serde::Deserialize;
 use surf;
 
 const PR_EDITMSG_PATH: &str = ".git/PR_EDITMSG";
@@ -38,6 +40,23 @@ impl fmt::Display for RepoError {
     }
 }
 
+impl error::Error for RepoError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        None
+    }
+}
+
+impl From<std::io::Error> for RepoError {
+    fn from(_x: std::io::Error) -> RepoError {
+        RepoError
+    }
+}
+
+impl From<serde_json::error::Error> for RepoError {
+    fn from(_x: serde_json::error::Error) -> RepoError {
+        RepoError
+    }
+}
 pub fn read_file(head_file: &Path) -> Result<String, io::Error> {
     fs::read_to_string(head_file)
 }
@@ -90,13 +109,16 @@ pub fn build_pr_msg(msg_path: Option<&str>) -> Option<PullRequestMsg> {
         println!("Error getting title");
     }
 
-    let body: String = lines
+    let msg_body: String = lines
         .take_while(|line| !line.starts_with("// Requesting a pull to"))
         .collect();
 
-    dbg!(&body);
+    dbg!(&msg_body);
 
-    Some(PullRequestMsg { title, body })
+    Some(PullRequestMsg {
+        title,
+        body: msg_body,
+    })
 }
 
 #[test]
@@ -247,11 +269,16 @@ fn test_build_request_payload() {
     )
 }
 
+#[derive(Debug, Deserialize)]
+pub struct VcsApiResponse {
+    pub html_url: String,
+}
+
 pub async fn fetch_api<'a>(
     repo_data: RepoData<'a>,
     token: &str,
     body: serde_json::Value,
-) -> Result<surf::Response, Box<dyn std::error::Error + Send + Sync + 'static>> {
+) -> Result<VcsApiResponse, RepoError> {
     let url = format!(
         "https://{}:{}@api.github.com/repos/{}/{}/pulls",
         &repo_data.author, &token, &repo_data.author, &repo_data.repo_name
@@ -259,7 +286,15 @@ pub async fn fetch_api<'a>(
 
     dbg!(&url);
 
-    let res = surf::post(&url).body_json(&body)?.await?;
-    dbg!(&res);
-    Ok(res)
+    let mut req = match surf::post(&url).body_json(&body)?.await {
+        Ok(r) => r,
+        Err(_) => return Err(RepoError),
+    };
+
+    let response_body: VcsApiResponse = match req.body_json().await {
+        Ok(b) => b,
+        Err(_) => return Err(RepoError),
+    };
+    dbg!(&response_body);
+    Ok(response_body)
 }
