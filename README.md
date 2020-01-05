@@ -1,22 +1,27 @@
 # git-pr
 plugin to open a pull-request from the command line
 
-## todo
+# usage
 
-- [x] when given branch-only option get the current working branch and origin
-  url
-- [x] if -m is passed launch $EDITOR
-- [ ] check the token
-    - [v1.0.0]if not available check for an .env file
-    - error if not
-- [x] construct the url
+open a pull request from current branch to master branch on origin
+```bash
+git pr origin
+```
 
+open a pull request to remote "upstream" on `feat/new-feature` branch:
+```bash
+git pr upstream feat/new-feature
+```
 
-- write the PR mesage template before launch editor, construct the
-  `PullRequestMsg` type before preparing the POST
+open a pull request using message passed on command line
+```bash
+git pr origin master -m "My pull request title"
+```
 
-- handle errors in fetch
+# install
+get the binary from github release
 
+TODO: @jafow
 
 
 # LICENSE
