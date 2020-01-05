@@ -10,7 +10,22 @@ const PR_EDITMSG_PATH: &str = ".git/PR_EDITMSG";
 mod gitpr;
 use gitpr::*;
 
-fn main() -> std::io::Result<()> {
+macro_rules! werr {
+    ($($arg:tt)*) => ({
+        use std::io::Write;
+        (writeln!(&mut ::std::io::stderr(), $($arg)*)).unwrap();
+    });
+}
+
+macro_rules! wout {
+    ($($arg:tt)*) => ({
+        use std::io::Write;
+        (writeln!(&mut ::std::io::stdout(), $($arg)*)).unwrap();
+    });
+}
+pub type PullRequestResult<T> = Result<T, PrError>;
+
+fn main() -> PullRequestResult<()> {
     let matches = App::new("git-pr")
                     .version("0.1.0")
                     .author("Jared Fowler <jaredafowler@gmail.com>")
@@ -48,13 +63,11 @@ fn main() -> std::io::Result<()> {
     };
     let token = env::var("GITHUB_TOKEN").expect("no GITHUB_TOKEN found in environment");
 
-    let git_head = gitpr::read_file(&Path::new("./.git/HEAD"))?;
-    let branch = gitpr::current_branch(git_head).unwrap();
-
     let config_file = gitpr::read_file(&Path::new("./.git/config"))?;
     let repo_data: RepoData =
         gitpr::repo_config(&config_file, remote).expect("read git config file");
 
+    let branch = gitpr::branch(&Path::new("./.git/HEAD"))?;
     gitpr::pr_msg_template(&target, &branch).expect("build PR message template");
 
     gitpr::launch_editor(PR_EDITMSG_PATH).expect("launch editor");
@@ -71,10 +84,15 @@ fn main() -> std::io::Result<()> {
         let payload = gitpr::build_request_payload(pr);
         match gitpr::fetch_api(repo_data, &token, payload).await {
             Ok(r) => {
-                println!("Pull request opend at {:?}", r.html_url);
+                wout!("Pull request opened at {:?}", r.html_url);
             }
             Err(e) => {
-                println!("Error opening pull request {:?}", e);
+                match e {
+                    PrError::Io(err) => werr!("Error: {:?}", err),
+                    PrError::Api(err) => werr!("Error calling API: {:?}", err),
+                    PrError::Other(err) => werr!("Base exception: {:?}", err),
+                    _ => werr!("Unknown exception: {:?}", e)
+                }
                 process::exit(1);
             }
         }

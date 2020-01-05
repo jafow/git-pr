@@ -8,7 +8,7 @@ use std::process::Command;
 
 use regex::Regex;
 use serde::Deserialize;
-use surf;
+use surf::{self, http};
 
 const PR_EDITMSG_PATH: &str = ".git/PR_EDITMSG";
 
@@ -31,12 +31,12 @@ pub struct RepoData<'a> {
     pub repo_name: &'a str,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum PrError {
     Api(String),
     Repo(String),
-    De(serde_json::error::Error),
-    Io(io::Error),
+    De(String),
+    Io(String),
     Other(String),
 }
 
@@ -58,35 +58,33 @@ impl error::Error for PrError {
     }
 }
 
-impl From<std::io::Error> for PrError {
-    fn from(_x: std::io::Error) -> PrError {
-        PrError::Io(_x)
+impl From<io::Error> for PrError {
+    fn from(_x: io::Error) -> PrError {
+        PrError::Io(_x.to_string())
     }
 }
 
 impl From<serde_json::error::Error> for PrError {
     fn from(_x: serde_json::error::Error) -> PrError {
-        PrError::De(_x)
+        PrError::De(_x.to_string())
     }
 }
 
-// impl From<std::option::NoneError> for PrError {
-//     fn from(_x: std::option::NoneError) -> PrError {
-//         PrError::Other(_x)
-//     }
-// }
+impl From<std::boxed::Box<dyn error::Error + std::marker::Send + std::marker::Sync>> for PrError {
+    fn from(x: Box<dyn error::Error + std::marker::Send + std::marker::Sync>) -> PrError {
+        PrError::Other(x.to_string())
+    }
+}
 
-pub type PullRequestResult<T> = Result<T, PrError>;
 
 pub fn read_file(head_file: &Path) -> Result<String, io::Error> {
     fs::read_to_string(head_file)
 }
 
-// pub fn branch(head_file: &Path) -> PullRequestResult<()> {
 pub fn branch(head_file: &Path) -> Result<String, PrError> {
-    match read_file(&Path::new("./.git/HEAD")) {
+    match read_file(head_file) {
         Ok(f) => current_branch(f),
-        Err(e) => Err(PrError::Io(e)),
+        Err(e) => Err(PrError::Io(format!("Cannot read .git HEAD file; {}", e.to_string()))),
     }
 }
 
@@ -94,20 +92,22 @@ pub fn branch(head_file: &Path) -> Result<String, PrError> {
 fn current_branch(head_file_contents: String) -> Result<String, PrError> {
     match head_file_contents.lines().next() {
         Some(line) => {
-            match line
-                .split('/')
-                .map(String::from)
-                .collect::<Vec<String>>()
-                .last()
-            {
-                Some(h) => Ok(h.to_string()),
-                None => Err(PrError::Repo(
+            if !line.contains('/') {
+                return Err(PrError::Repo(
                     "Could not find current branch from git config".to_string(),
-                )),
+                ));
+            }
+
+            if let Some(b) = line.split('/').map(String::from).collect::<Vec<String>>().last() { 
+                Ok(b.to_string())
+            } else {
+                Err(PrError::Repo(
+                    "Could not find current branch from git config".to_string(),
+                ))
             }
         }
-        None => Err(PrError::Repo(
-            "Could not find current branch from git config".to_string(),
+        None => Err(PrError::Io(
+            "Could not find git HEAD file".to_string(),
         )),
     }
 }
@@ -117,7 +117,7 @@ fn test_current_branch() {
     let hf = read_file(&Path::new("./tests/HEAD_A")).expect("test file");
     let actual = current_branch(hf);
 
-    assert_eq!(Some(String::from("test-branch")), actual);
+    assert_eq!(Ok(String::from("test-branch")), actual);
 }
 
 #[test]
@@ -125,15 +125,31 @@ fn test_current_branch() {
 fn test_current_branch_errors() {
     // it should panic if file doesn't exist or is malformed
     let hf = read_file(&Path::new("./tests/HEAD_FILENOTFOUND")).expect("test file");
-    current_branch(hf);
+    current_branch(hf).unwrap();
 
     let hf = read_file(&Path::new("./tests/HEAD_BROKEN")).expect("test file");
-    current_branch(hf);
+    current_branch(hf).unwrap();
 }
 
 #[test]
 fn test_branch() {
     // it should return a branch from the path to the git HEAD file
+    assert_eq!(
+        Ok(String::from("test-branch")),
+        branch(&Path::new("./tests/HEAD_A"))
+    );
+    assert_eq!(
+        Err(PrError::Io(
+            "Cannot read .git HEAD file; No such file or directory (os error 2)".to_string()
+        )),
+        branch(&Path::new("./tests/HEAD_FILENOTFOUND"))
+    );
+    assert_eq!(
+        Err(PrError::Repo(
+            "Could not find current branch from git config".to_string(),
+        )),
+        branch(&Path::new("./tests/HEAD_BROKEN"))
+    );
 }
 
 pub fn build_pr_msg(msg_path: Option<&str>) -> Result<PullRequestMsg, PrError> {
@@ -141,15 +157,15 @@ pub fn build_pr_msg(msg_path: Option<&str>) -> Result<PullRequestMsg, PrError> {
         Some(p) => p,
         None => PR_EDITMSG_PATH,
     };
-    let mut title = String::new();
+    let mut _title = String::new();
 
     // let pr_file: String = fs::read_to_string(p).expect("read test file");
     let pr_file: String = fs::read_to_string(p)?;
     let mut lines = pr_file.lines();
 
     // set the first line as title
-    if let Some(_title) = lines.next() {
-        title = String::from(_title);
+    if let Some(t) = lines.next() {
+        _title = String::from(t);
     } else {
         return Err(PrError::Repo("Unable to read title".to_string()));
     }
@@ -161,7 +177,7 @@ pub fn build_pr_msg(msg_path: Option<&str>) -> Result<PullRequestMsg, PrError> {
     dbg!(&msg_body);
 
     Ok(PullRequestMsg {
-        title,
+        title: _title,
         body: msg_body,
     })
 }
@@ -173,7 +189,7 @@ fn test_build_message() -> Result<(), Box<dyn std::error::Error>> {
     let mut f = File::create(PR_EDITMSG_PATH)?;
     f.write_all(
         b"test title\n\nthis is a test msg body\n\n// Requesting a pull to master from feat",
-    );
+    )?;
 
     let expected = PullRequestMsg {
         title: String::from("test title"),
@@ -183,8 +199,8 @@ fn test_build_message() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// captures author, repo, and remote url from git config file
 pub fn repo_config<'a>(text: &'a str, remote_match: &'a str) -> Result<RepoData<'a>, PrError> {
-    // captures author, repo, and remote url from git config file
     let re = Regex::new(r#"\[remote\s+"(?P<origin>\w+)"\]\n\turl\s=\s(https?://|git@)github.com[:/]?(?P<author>[A-Za-z0-9_-]+)/(?P<repo>[A-Za-z0-9_-]+)"#).unwrap();
 
     // get only lines that match on the remote provided so that we
@@ -194,17 +210,25 @@ pub fn repo_config<'a>(text: &'a str, remote_match: &'a str) -> Result<RepoData<
         .filter(|c| c.name("origin").unwrap().as_str() == remote_match)
     {
         Some(m) => m,
-        None => return Err(PrError),
+        None => return Err(PrError::Repo("failed to read repo config".to_string())),
     };
 
     Ok(RepoData {
         author: match match_lines.get(3) {
             Some(s) => s.as_str(),
-            None => return Err(PrError),
+            None => {
+                return Err(PrError::Repo(
+                    "cannot find author data in config".to_string(),
+                ))
+            }
         },
         repo_name: match match_lines.get(4) {
             Some(s) => s.as_str(),
-            None => return Err(PrError),
+            None => {
+                return Err(PrError::Repo(
+                    "cannot find repo name data in config".to_string(),
+                ))
+            }
         },
     })
 }
@@ -247,12 +271,12 @@ fn test_repo_config() {
 	merge = refs/heads/master
 "#;
     assert_eq!(
-        Err(PrError),
+        Err(PrError::Repo("failed to read repo config".to_string())),
         repo_config(cfg_file, "upstream"),
         "Error on non existent remote"
     );
     assert_eq!(
-        Err(PrError),
+        Err(PrError::Repo("failed to read repo config".to_string())),
         repo_config(cfg_file, "origin"),
         "Error on malformed url"
     );
@@ -315,42 +339,34 @@ fn test_build_request_payload() {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct VcsApiResponse {
+pub struct VcsApiResponseSuccess {
     pub html_url: String,
+    pub number: u32
 }
 
-#[derive(Debug, Error)]
-pub enum FooBarErr {
-    /// The supplied configuration contained an invalid value
-    #[error(display = "illegal configuration value: {}", _0)]
-    IllegalValue(&'static str),
-    /// A configuration field that will be encoded as a variable-length integer exceeds the 0..2^62
-    /// range
-    #[error(display = "{} must be at most 2^62-1", _0)]
-    VarIntBounds(&'static str),
+#[derive(Debug, Deserialize)]
+struct VcsApiResponseError {
+    pub message: String,
 }
 
 pub async fn fetch_api<'a>(
     repo_data: RepoData<'a>,
     token: &str,
     body: serde_json::Value,
-) -> Result<VcsApiResponse, PrError> {
+) -> Result<VcsApiResponseSuccess, PrError> {
     let url = format!(
         "https://{}:{}@api.github.com/repos/{}/{}/pulls",
         &repo_data.author, &token, &repo_data.author, &repo_data.repo_name
     );
 
-    dbg!(&url);
+    let mut req = surf::post(&url).body_json(&body)?.await?; 
 
-    let mut req = match surf::post(&url).body_json(&body)?.await {
-        Ok(r) => r,
-        Err(_) => return Err(PrError),
-    };
-
-    let response_body: VcsApiResponse = match req.body_json().await {
-        Ok(b) => b,
-        Err(_) => return Err(PrError),
-    };
-    dbg!(&response_body);
-    Ok(response_body)
+    if let http::status::StatusCode::CREATED  = req.status() {
+        let response: VcsApiResponseSuccess = req.body_json().await?;
+        dbg!(&response);
+        Ok(response)
+    } else {
+        let response: VcsApiResponseError = req.body_json().await?;
+        Err(PrError::Api(response.message.to_string()))
+    }
 }
