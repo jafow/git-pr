@@ -2,14 +2,12 @@ SHELL=bash
 
 .PHONY: clean ./builds
 
-test: 
-	cargo run test
-
 release: tarball
 	. ./scripts/release.sh
 	
 tarball: ./builds	
-	. ./scripts/bundle.sh
+	@echo "do build"
+	# . ./scripts/bundle.sh
 
 ./builds: 
 	mkdir -p ./builds
