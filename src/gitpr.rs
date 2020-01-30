@@ -98,13 +98,9 @@ fn current_branch(head_file_contents: String) -> Result<String, PrError> {
                 ));
             }
 
-            if let Some(b) = line.split('/').map(String::from).collect::<Vec<String>>().last() { 
-                Ok(b.to_string())
-            } else {
-                Err(PrError::Repo(
-                    "Could not find current branch from git config".to_string(),
-                ))
-            }
+            Ok(
+                line.split('/').map(String::from).collect::<Vec<String>>()[2..].join("/")
+            )
         }
         None => Err(PrError::Io(
             "Could not find git HEAD file".to_string(),
@@ -118,6 +114,13 @@ fn test_current_branch() {
     let actual = current_branch(hf);
 
     assert_eq!(Ok(String::from("test-branch")), actual);
+
+    // it should handle branches with path names
+    let actual = current_branch(String::from("ref: refs/heads/feat/test-branch"));
+    assert_eq!(Ok(String::from("feat/test-branch")), actual);
+
+    let actual = current_branch(String::from("ref: refs/heads/feat/nested//test-branch"));
+    assert_eq!(Ok(String::from("feat/nested//test-branch")), actual);
 }
 
 #[test]
