@@ -43,9 +43,9 @@ pub enum PrError {
 impl fmt::Display for PrError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
+            PrError::Io(ref e) => e.fmt(f),
             PrError::Api(ref e) => e.fmt(f),
             PrError::Repo(ref e) => e.fmt(f),
-            PrError::Io(ref e) => e.fmt(f),
             PrError::De(ref e) => e.fmt(f),
             PrError::Other(ref s) => f.write_str(&**s),
         }
@@ -70,12 +70,11 @@ impl From<serde_json::error::Error> for PrError {
     }
 }
 
-impl From<std::boxed::Box<dyn error::Error + std::marker::Send + std::marker::Sync>> for PrError {
-    fn from(x: Box<dyn error::Error + std::marker::Send + std::marker::Sync>) -> PrError {
-        PrError::Other(x.to_string())
+impl From<std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>> for PrError {
+    fn from(_x: std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>) -> PrError {
+        PrError::Repo(_x.to_string())
     }
 }
-
 
 pub fn read_file(head_file: &Path) -> Result<String, io::Error> {
     fs::read_to_string(head_file)
@@ -175,6 +174,7 @@ pub fn build_pr_msg(msg_path: Option<&str>) -> Result<PullRequestMsg, PrError> {
 
     let msg_body: String = lines
         .take_while(|line| !line.starts_with("// Requesting a pull to"))
+        .map(|line| format!("{}\n", line))
         .collect();
 
     dbg!(&msg_body);
@@ -191,14 +191,45 @@ fn test_build_message() -> Result<(), Box<dyn std::error::Error>> {
     const PR_EDITMSG_PATH: &str = "./tests/PR_EDITMSG";
     let mut f = File::create(PR_EDITMSG_PATH)?;
     f.write_all(
-        b"test title\n\nthis is a test msg body\n\n// Requesting a pull to master from feat",
+        b"test title\n\nthis is a test msg body\n// Requesting a pull to master from feat",
     )?;
 
     let expected = PullRequestMsg {
         title: String::from("test title"),
-        body: String::from("this is a test msg body"),
+        body: String::from("\nthis is a test msg body\n"),
     };
     assert_eq!(Ok(expected), build_pr_msg(Some(PR_EDITMSG_PATH)));
+
+    // it should preserve newlines
+    let mut f = File::create(PR_EDITMSG_PATH)?;
+    f.write_all(
+        b"test title\nthis is a test msg body\nit has multiple lines\nand \n- formatting\n- with bullets\n- :zap:\n// Requesting a pull to master from feat",
+    )?;
+
+    let expected = PullRequestMsg {
+        title: String::from("test title"),
+        body: String::from("this is a test msg body\nit has multiple lines\nand \n- formatting\n- with bullets\n- :zap:\n"),
+    };
+    assert_eq!(Ok(expected), build_pr_msg(Some(PR_EDITMSG_PATH)));
+
+    let mut f = File::create(PR_EDITMSG_PATH).expect("creates from template file");
+    let multiline_msg = "this is the top line
+
+this is a new line
+
+and another
+
+1. one
+2. two
+3. thread";
+
+    f.write_all(multiline_msg.as_bytes()).expect("writes the message");
+
+    assert_eq!(Ok(PullRequestMsg {
+        title: String::from("this is the top line"),
+        body: String::from("\nthis is a new line\n\nand another\n\n1. one\n2. two\n3. thread\n")
+    }), build_pr_msg(Some(PR_EDITMSG_PATH)));
+
     Ok(())
 }
 
